@@ -8,16 +8,16 @@ SyncSphere is a modern OS-integrated directory synchronization platform built as
 
 ## Features
 
-- **Real Directory Comparison** — SHA-256 checksum-based file comparison with size, timestamp, and content analysis
-- **One-Way Synchronization** — Copy new and modified files from source to destination
-- **Two-Way Synchronization** — Bidirectional sync with intelligent conflict detection
-- **Selective Synchronization** — Choose specific files and folders to sync
-- **Real-Time Progress** — WebSocket-powered live sync progress updates
-- **File Monitoring** — Watchdog-based filesystem event detection (create/modify/delete/rename)
-- **Conflict Resolution** — Safe conflict handling with user-controlled resolution
-- **Sync History** — Persistent SQLite-based history with detailed operation logs
-- **Directory Explorer** — Professional file browser with metadata
-- **Dark/Light Themes** — Professional UI with theme switching
+- **Real Directory Comparison** - SHA-256 checksum-based file comparison with size, timestamp, and content analysis
+- **One-Way Synchronization** - Copy new and modified files from source to destination
+- **Two-Way Synchronization** - Bidirectional sync with intelligent conflict detection
+- **Selective Synchronization** - Choose specific files and folders to sync
+- **Real-Time Progress** - WebSocket-powered live sync progress updates
+- **File Monitoring** - Watchdog-based filesystem event detection (create/modify/delete/rename)
+- **Conflict Resolution** - Safe conflict handling with user-controlled resolution
+- **Sync History** - Persistent SQLite-based history with detailed operation logs
+- **Directory Explorer** - Professional file browser with metadata
+- **Dark/Light Themes** - Professional UI with theme switching
 
 ## Technology Stack
 
@@ -202,20 +202,20 @@ Comprehensive error handling for permission denied, file not found, disk full, a
 
 ## Testing Scenarios
 
-1. **Empty source directory** — Compare returns all destination files as "deleted"
-2. **Empty destination** — All source files shown as "new"
-3. **Identical directories** — All files marked "unchanged"
-4. **New file in source** — File appears as "new" in comparison
-5. **Modified file** — SHA-256 mismatch detected as "modified"
-6. **Deleted from source** — File shown as "deleted" (exists only in dest)
-7. **Nested directories** — Full recursive comparison and sync
-8. **Duplicate filenames** — Handled by relative path, not just name
-9. **Permission errors** — Graceful error display, skipped with log
-10. **Large files** — Chunk-based hashing, progress updates
-11. **Conflicts** — Two-way sync detects and surfaces for resolution
-12. **Invalid paths** — Validation rejects with clear error message
-13. **Destination missing** — Option to create destination directory
+1. **Empty source directory** - Compare returns all destination files as "deleted"
+2. **Empty destination** - All source files shown as "new"
+3. **Identical directories** - All files marked "unchanged"
+4. **New file in source** - File appears as "new" in comparison
+5. **Modified file** - SHA-256 mismatch detected as "modified"
+6. **Deleted from source** - File shown as "deleted" (exists only in dest)
+7. **Nested directories** - Full recursive comparison and sync
+8. **Duplicate filenames** - Handled by relative path, not just name
+9. **Permission errors** - Graceful error display, skipped with log
+10. **Large files** - Chunk-based hashing, progress updates
+11. **Conflicts** - Two-way sync detects and surfaces for resolution
+12. **Invalid paths** - Validation rejects with clear error message
+13. **Destination missing** - Option to create destination directory
 
 ## License
 
-Academic project — Operating Systems course.
+Academic project - Operating Systems course.
