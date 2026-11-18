@@ -1,4 +1,4 @@
-# SyncSphere — Repository & Directory Synchronizer
+# SyncSphere - Repository & Directory Synchronizer
 
 > A professional, full-stack web application for synchronizing directories with real-time progress monitoring, conflict resolution, and comprehensive activity history.
 
