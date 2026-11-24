@@ -56,7 +56,34 @@ def compare(opts: CompareOptions):
 def get_result():
     state = _state()
     if state.last_comparison is None:
-        raise HTTPException(status_code=404, detail="No comparison result available. Run /compare first.")
+        if state.source_dir and state.dest_dir and Path(state.source_dir).exists() and Path(state.dest_dir).exists():
+            result = compare_directories(state.source_dir, state.dest_dir, {"use_checksum": True, "include_hidden": False})
+            data = {
+                "source_path": result.source_path,
+                "dest_path": result.dest_path,
+                "comparison_time": result.comparison_time,
+                "total_source": result.total_source,
+                "total_dest": result.total_dest,
+                "new_files": [asdict(f) for f in result.new_files],
+                "modified_files": [asdict(f) for f in result.modified_files],
+                "deleted_files": [asdict(f) for f in result.deleted_files],
+                "unchanged_files": [asdict(f) for f in result.unchanged_files],
+                "summary": {
+                    "new": len(result.new_files),
+                    "modified": len(result.modified_files),
+                    "deleted": len(result.deleted_files),
+                    "unchanged": len(result.unchanged_files),
+                },
+            }
+            state.last_comparison = data
+            return data
+        return {
+            "summary": {"new": 0, "modified": 0, "deleted": 0, "unchanged": 0},
+            "new_files": [],
+            "modified_files": [],
+            "deleted_files": [],
+            "unchanged_files": [],
+        }
     return state.last_comparison
 
 

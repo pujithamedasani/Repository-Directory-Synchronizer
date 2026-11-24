@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Play, Square, Eye, FolderOpen, ArrowRight, ShieldCheck, RefreshCw, Sparkles } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Play, Square, Eye, FolderOpen, ArrowRight, ShieldCheck, RefreshCw, Sparkles, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../context/AppContext'
 import {
@@ -12,6 +12,8 @@ import {
   getDestDir,
   getConflicts,
   resolveConflict,
+  getSyncStatus,
+  resetDemoDirs,
 } from '../services/api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { formatBytes } from '../utils/formatters'
@@ -23,12 +25,14 @@ import Modal from '../components/ui/Modal'
 
 export default function Synchronize() {
   const { sourceDir, destDir, setSourceDir, setDestDir, syncStatus, setSyncStatus, syncProgress, setSyncProgress } = useApp()
-  const [mode, setMode] = useState('one_way')
+  const [mode, setMode] = useState('one_way') // 'one_way' | 'two_way'
   const [deleteOrphans, setDeleteOrphans] = useState(false)
   const [dryRunPreview, setDryRunPreview] = useState(null)
   const [conflicts, setConflicts] = useState([])
   const [loading, setLoading] = useState(false)
+  const [resettingDemo, setResettingDemo] = useState(false)
   const [conflictModalOpen, setConflictModalOpen] = useState(false)
+  const pollTimerRef = useRef(null)
 
   // Auto-load existing directories from backend on mount
   useEffect(() => {
@@ -44,18 +48,22 @@ export default function Synchronize() {
     loadDirs()
   }, [])
 
-  // Listen for WebSocket live progress
+  // Keep WebSocket listening for live progress
   useWebSocket('/ws/progress', {
-    enabled: syncStatus === 'running',
+    enabled: true,
     onMessage: (msg) => {
-      if (msg.type === 'progress') {
-        setSyncProgress(msg.data)
-      } else if (msg.type === 'completed') {
+      if (msg.type === 'sync_progress' || msg.percent != null) {
+        setSyncProgress(msg)
+      }
+      if (msg.status === 'completed' || msg.type === 'completed') {
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
         setSyncStatus('completed')
-        toast.success('Synchronization finished!')
-      } else if (msg.type === 'error') {
+        setSyncProgress(null)
+        toast.success('Synchronization finished successfully!')
+      } else if (msg.status === 'failed' || msg.type === 'error') {
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
         setSyncStatus('failed')
-        toast.error(`Sync error: ${msg.data?.error || 'Failed'}`)
+        toast.error(`Sync error: ${msg.error || 'Failed'}`)
       }
     },
   })
@@ -87,8 +95,30 @@ export default function Synchronize() {
     const demoDest = 'E:\\Projects\\OS_Project\\demo_dest'
     setSourceDir(demoSource)
     setDestDir(demoDest)
-    await Promise.allSettled([apiSetSource(demoSource), apiSetDest(demoDest)])
-    toast.success('Loaded demo directories!')
+    try {
+      await Promise.allSettled([apiSetSource(demoSource), apiSetDest(demoDest)])
+      toast.success('Loaded demo directory paths!')
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleResetDemoData = async () => {
+    setResettingDemo(true)
+    try {
+      const res = await resetDemoDirs()
+      if (res.data?.source) setSourceDir(res.data.source)
+      if (res.data?.destination) setDestDir(res.data.destination)
+      setDryRunPreview(null)
+      toast.success('Fresh demo data generated! Ready to test two-way sync.')
+      // Fetch fresh conflicts
+      const cRes = await getConflicts()
+      setConflicts(cRes.data || [])
+    } catch (err) {
+      toast.error(err.message || 'Failed to reset demo directories')
+    } finally {
+      setResettingDemo(false)
+    }
   }
 
   const handleStartSync = async () => {
@@ -106,10 +136,34 @@ export default function Synchronize() {
       await startSync({
         source_dir: sourceDir,
         dest_dir: destDir,
+        mode: mode,
         sync_mode: mode,
+        delete_extra: deleteOrphans,
         delete_orphans: deleteOrphans,
       })
-      toast.success('Sync started in background.')
+      toast.success(mode === 'two_way' ? 'Two-way synchronization started!' : 'One-way mirror sync started!')
+
+      if (mode === 'two_way') {
+        const cRes = await getConflicts()
+        setConflicts(cRes.data || [])
+      }
+
+      // Polling fallback to guarantee completion detection
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const res = await getSyncStatus()
+          if (!res.data?.active) {
+            clearInterval(pollTimerRef.current)
+            setSyncStatus('completed')
+            setSyncProgress(null)
+          } else if (res.data?.files_done != null) {
+            setSyncProgress(res.data)
+          }
+        } catch {
+          clearInterval(pollTimerRef.current)
+        }
+      }, 700)
     } catch (err) {
       setSyncStatus('failed')
       toast.error(err.message || 'Failed to start sync')
@@ -120,6 +174,7 @@ export default function Synchronize() {
 
   const handleCancelSync = async () => {
     try {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
       await cancelSync()
       setSyncStatus('cancelled')
       toast.success('Sync cancelled.')
@@ -139,9 +194,14 @@ export default function Synchronize() {
       const res = await previewSync({
         source_dir: sourceDir,
         dest_dir: destDir,
+        mode: mode,
         sync_mode: mode,
       })
       setDryRunPreview(res.data)
+      if (mode === 'two_way') {
+        const cRes = await getConflicts()
+        setConflicts(cRes.data || [])
+      }
       toast.success('Dry-run preview generated.')
     } catch (err) {
       toast.error(err.message || 'Failed to generate preview')
@@ -177,9 +237,25 @@ export default function Synchronize() {
           <h2 className="text-xl font-bold text-slate-100">Directory Synchronization</h2>
           <p className="text-sm text-slate-500">Perform concurrent, multi-threaded directory mirroring and bidirectional syncing.</p>
         </div>
-        <Button variant="secondary" icon={Sparkles} onClick={loadDemoDirs}>
-          Load Demo Directories
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            icon={Sparkles}
+            onClick={loadDemoDirs}
+            title="Auto-fill Source and Destination with demo paths"
+          >
+            Load Demo Directories
+          </Button>
+          <Button
+            variant="secondary"
+            icon={RotateCcw}
+            onClick={handleResetDemoData}
+            loading={resettingDemo}
+            title="Regenerate fresh test files on disk"
+          >
+            Reset Demo Data
+          </Button>
+        </div>
       </div>
 
       <Card className="p-6">
@@ -225,35 +301,57 @@ export default function Synchronize() {
           <div>
             <label className="text-xs text-slate-400 block mb-2">Synchronization Mode</label>
             <div className="space-y-2">
-              <label className="flex items-center gap-3 p-3 rounded-lg border border-[#2a2a3a] bg-[#1e1e2a] cursor-pointer">
+              {/* One-Way Card */}
+              <div
+                onClick={() => setMode('one_way')}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer ${
+                  mode === 'one_way'
+                    ? 'border-indigo-500 bg-indigo-500/15 shadow-sm shadow-indigo-500/20'
+                    : 'border-[#2a2a3a] bg-[#1e1e2a] hover:bg-[#1e1e2a]/80'
+                }`}
+              >
                 <input
                   type="radio"
                   name="syncMode"
                   value="one_way"
                   checked={mode === 'one_way'}
                   onChange={() => setMode('one_way')}
-                  className="text-indigo-600 focus:ring-0"
+                  className="text-indigo-600 focus:ring-0 cursor-pointer"
                 />
                 <div>
-                  <div className="text-sm font-medium text-slate-200">One-Way Sync (Mirror)</div>
-                  <div className="text-xs text-slate-500">Copy changes from Source to Destination</div>
+                  <div className="text-sm font-medium text-slate-200 flex items-center gap-2">
+                    <span>One-Way Sync (Mirror)</span>
+                    {mode === 'one_way' && <Badge status="new" size="xs">Active</Badge>}
+                  </div>
+                  <div className="text-xs text-slate-400">Copy changes unidirectionally from Source to Destination</div>
                 </div>
-              </label>
+              </div>
 
-              <label className="flex items-center gap-3 p-3 rounded-lg border border-[#2a2a3a] bg-[#1e1e2a] cursor-pointer">
+              {/* Two-Way Card */}
+              <div
+                onClick={() => setMode('two_way')}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer ${
+                  mode === 'two_way'
+                    ? 'border-indigo-500 bg-indigo-500/15 shadow-sm shadow-indigo-500/20'
+                    : 'border-[#2a2a3a] bg-[#1e1e2a] hover:bg-[#1e1e2a]/80'
+                }`}
+              >
                 <input
                   type="radio"
                   name="syncMode"
                   value="two_way"
                   checked={mode === 'two_way'}
                   onChange={() => setMode('two_way')}
-                  className="text-indigo-600 focus:ring-0"
+                  className="text-indigo-600 focus:ring-0 cursor-pointer"
                 />
                 <div>
-                  <div className="text-sm font-medium text-slate-200">Two-Way Sync (Bidirectional)</div>
-                  <div className="text-xs text-slate-500">Merge changes between both directories with conflict detection</div>
+                  <div className="text-sm font-medium text-slate-200 flex items-center gap-2">
+                    <span>Two-Way Sync (Bidirectional)</span>
+                    {mode === 'two_way' && <Badge status="new" size="xs">Active</Badge>}
+                  </div>
+                  <div className="text-xs text-slate-400">Merge changes bidirectionally between both folders with conflict resolution</div>
                 </div>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -267,8 +365,8 @@ export default function Synchronize() {
                 className="rounded text-indigo-600 focus:ring-0"
               />
               <div>
-                <div className="text-sm font-medium text-slate-200">Delete Extraneous Files</div>
-                <div className="text-xs text-slate-500">Remove files in destination that no longer exist in source</div>
+                <div className="text-sm font-medium text-slate-200">Delete Extraneous Files (One-Way only)</div>
+                <div className="text-xs text-slate-500">Remove destination files that do not exist in source</div>
               </div>
             </label>
           </div>
@@ -280,8 +378,13 @@ export default function Synchronize() {
               Cancel Sync
             </Button>
           ) : (
-            <Button variant="primary" icon={Play} loading={loading} onClick={handleStartSync}>
-              Start Synchronization
+            <Button
+              variant="primary"
+              icon={Play}
+              loading={loading}
+              onClick={handleStartSync}
+            >
+              {mode === 'two_way' ? 'Start Two-Way Sync (Bidirectional)' : 'Start One-Way Sync (Mirror)'}
             </Button>
           )}
 
@@ -298,39 +401,64 @@ export default function Synchronize() {
       {syncStatus === 'running' && syncProgress && (
         <Card className="p-6 border-indigo-500/30">
           <div className="flex justify-between items-center mb-2">
-            <span className="text-sm font-medium text-indigo-400">Syncing files in background...</span>
+            <span className="text-sm font-medium text-indigo-400">
+              Syncing in background ({mode === 'two_way' ? 'Bidirectional' : 'Mirror'})...
+            </span>
             <span className="text-sm text-slate-400">{Math.round(syncProgress.percent || 0)}%</span>
           </div>
           <ProgressBar value={syncProgress.percent || 0} max={100} />
           <div className="mt-3 flex justify-between text-xs text-slate-500 font-mono">
             <span>Current: {syncProgress.current_file || 'Processing...'}</span>
-            <span>{formatBytes(syncProgress.bytes_done || 0)} / {formatBytes(syncProgress.total_bytes || 0)}</span>
+            <span>Files: {syncProgress.files_done || 0} / {syncProgress.total_files || 0}</span>
           </div>
         </Card>
       )}
 
       {dryRunPreview && (
         <Card className="p-6">
-          <h3 className="text-md font-semibold text-slate-200 mb-2">Dry-Run Preview Result</h3>
+          <h3 className="text-md font-semibold text-slate-200 mb-2">
+            Dry-Run Preview Result ({dryRunPreview.mode === 'two_way' ? 'Two-Way Bidirectional' : 'One-Way Mirror'})
+          </h3>
           <p className="text-xs text-slate-500 mb-4">No files were modified. These actions will execute upon starting sync.</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center mb-4">
-            <div className="p-3 bg-[#1e1e2a] rounded-lg">
-              <div className="text-lg font-bold text-green-400">{dryRunPreview.files_to_copy ?? 0}</div>
-              <div className="text-xs text-slate-500">To Copy</div>
+          {dryRunPreview.mode === 'two_way' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center mb-4">
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-green-400">{dryRunPreview.source_to_dest_count ?? 0}</div>
+                <div className="text-xs text-slate-500">Source → Dest (New)</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-blue-400">{dryRunPreview.dest_to_source_count ?? 0}</div>
+                <div className="text-xs text-slate-500">Dest → Source (Propagated)</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-orange-400">{dryRunPreview.conflict_count ?? 0}</div>
+                <div className="text-xs text-slate-500">Modified / Conflicts</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-slate-400">{dryRunPreview.files_to_skip ?? 0}</div>
+                <div className="text-xs text-slate-500">Unchanged</div>
+              </div>
             </div>
-            <div className="p-3 bg-[#1e1e2a] rounded-lg">
-              <div className="text-lg font-bold text-blue-400">{dryRunPreview.files_to_update ?? 0}</div>
-              <div className="text-xs text-slate-500">To Update</div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center mb-4">
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-green-400">{dryRunPreview.files_to_copy ?? 0}</div>
+                <div className="text-xs text-slate-500">To Copy</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-blue-400">{dryRunPreview.files_to_update ?? 0}</div>
+                <div className="text-xs text-slate-500">To Update</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-red-400">{dryRunPreview.files_to_delete ?? 0}</div>
+                <div className="text-xs text-slate-500">To Delete</div>
+              </div>
+              <div className="p-3 bg-[#1e1e2a] rounded-lg">
+                <div className="text-lg font-bold text-slate-400">{dryRunPreview.files_to_skip ?? 0}</div>
+                <div className="text-xs text-slate-500">Unchanged</div>
+              </div>
             </div>
-            <div className="p-3 bg-[#1e1e2a] rounded-lg">
-              <div className="text-lg font-bold text-red-400">{dryRunPreview.files_to_delete ?? 0}</div>
-              <div className="text-xs text-slate-500">To Delete</div>
-            </div>
-            <div className="p-3 bg-[#1e1e2a] rounded-lg">
-              <div className="text-lg font-bold text-slate-400">{dryRunPreview.files_to_skip ?? 0}</div>
-              <div className="text-xs text-slate-500">Unchanged</div>
-            </div>
-          </div>
+          )}
         </Card>
       )}
 
@@ -343,7 +471,7 @@ export default function Synchronize() {
               <div key={i} className="p-3 bg-[#1e1e2a] rounded-lg border border-[#2a2a3a] flex items-center justify-between">
                 <div>
                   <span className="text-xs font-mono text-slate-300 truncate max-w-xs block">{c.relative_path}</span>
-                  <span className="text-[10px] text-slate-500">Resolution: {c.resolution}</span>
+                  <span className="text-[10px] text-slate-500">Resolution: {c.resolution || 'Auto (Newer wins)'}</span>
                 </div>
                 <div className="flex gap-2">
                   <Button size="xs" variant="secondary" onClick={() => handleResolveConflict(c.relative_path, 'source')}>

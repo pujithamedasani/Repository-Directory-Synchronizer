@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FolderSync, Files, HardDrive, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { getHistoryStats, getHistory, getComparisonResult } from '../services/api'
+import { getHistoryStats, getHistory, getComparisonResult, getSourceDir, getDestDir } from '../services/api'
 import { formatBytes } from '../utils/formatters'
 import StatsCard from '../components/dashboard/StatsCard'
 import DirectoryOverview from '../components/dashboard/DirectoryOverview'
@@ -11,7 +11,7 @@ import FileDistribution from '../components/dashboard/FileDistribution'
 import RecentActivity from '../components/dashboard/RecentActivity'
 
 export default function Overview() {
-  const { sourceDir, destDir } = useApp()
+  const { sourceDir, destDir, setSourceDir, setDestDir } = useApp()
   const [stats, setStats] = useState(null)
   const [recentSessions, setRecentSessions] = useState([])
   const [lastSession, setLastSession] = useState(null)
@@ -23,10 +23,12 @@ export default function Overview() {
     const fetchData = async () => {
       setLoading(true)
       try {
-        const [statsRes, historyRes, compRes] = await Promise.allSettled([
+        const [statsRes, historyRes, compRes, sDirRes, dDirRes] = await Promise.allSettled([
           getHistoryStats(),
-          getHistory({ limit: 10 }),
+          getHistory({ limit: 15 }),
           getComparisonResult(),
+          getSourceDir(),
+          getDestDir(),
         ])
 
         if (isMounted) {
@@ -38,6 +40,12 @@ export default function Overview() {
           }
           if (compRes.status === 'fulfilled') {
             setComparisonData(compRes.value.data?.summary || null)
+          }
+          if (sDirRes.status === 'fulfilled' && sDirRes.value.data?.source && !sourceDir) {
+            setSourceDir(sDirRes.value.data.source)
+          }
+          if (dDirRes.status === 'fulfilled' && dDirRes.value.data?.destination && !destDir) {
+            setDestDir(dDirRes.value.data.destination)
           }
         }
       } catch (err) {
@@ -51,10 +59,15 @@ export default function Overview() {
     return () => { isMounted = false }
   }, [])
 
-  const chartData = recentSessions.map(s => ({
-    date: s.start_time ? new Date(s.start_time).toLocaleDateString() : 'N/A',
-    files_synced: (s.files_copied || 0) + (s.files_updated || 0),
-  })).reverse()
+  const chartData = recentSessions.map(s => {
+    const d = s.start_time ? new Date(s.start_time) : null
+    const dateStr = d ? `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}` : `#${s.id}`
+    return {
+      date: dateStr,
+      files_synced: (s.files_copied || 0) + (s.files_updated || 0),
+      session: `#${s.id}`,
+    }
+  }).reverse()
 
   return (
     <div className="space-y-6">
@@ -67,7 +80,7 @@ export default function Overview() {
         <StatsCard
           icon={FolderSync}
           label="Total Sync Sessions"
-          value={stats?.total_sessions ?? 0}
+          value={stats?.total_sessions ?? recentSessions.length}
           iconColor="text-indigo-400"
           iconBg="bg-indigo-500/10"
           loading={loading}
@@ -75,7 +88,7 @@ export default function Overview() {
         <StatsCard
           icon={CheckCircle2}
           label="Completed"
-          value={stats?.completed ?? 0}
+          value={stats?.completed ?? recentSessions.filter(s => s.status === 'completed').length}
           iconColor="text-green-400"
           iconBg="bg-green-500/10"
           loading={loading}

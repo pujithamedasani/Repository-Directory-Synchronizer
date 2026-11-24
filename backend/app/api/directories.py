@@ -172,3 +172,28 @@ def create_directory(body: PathBody):
         return {"created": True, "path": normalize_path(str(resolved))}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/reset-demo")
+def reset_demo():
+    import sys
+    from pathlib import Path
+    root_dir = Path(__file__).resolve().parent.parent.parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+    try:
+        import demo_generator
+        demo_generator.create_demo_data()
+        src = normalize_path(str(root_dir / "demo_source"))
+        dst = normalize_path(str(root_dir / "demo_dest"))
+        _state().source_dir = src
+        _state().dest_dir = dst
+        _state().last_comparison = None
+        return {
+            "success": True,
+            "source": src,
+            "destination": dst,
+            "message": "Demo test directories reset successfully with fresh un-synced data!"
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

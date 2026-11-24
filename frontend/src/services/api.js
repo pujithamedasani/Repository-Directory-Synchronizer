@@ -23,6 +23,7 @@ export const getDestDir = () => api.get('/directories/destination')
 export const scanDirectories = () => api.get('/directories/scan')
 export const validatePath = (path) => api.post('/directories/validate', { path })
 export const createDirectory = (path) => api.post('/directories/create', { path })
+export const resetDemoDirs = () => api.post('/directories/reset-demo')
 
 // Comparison APIs
 export const compareDirectories = (options) => api.post('/comparison/compare', options)
@@ -43,15 +44,15 @@ export const getMonitoringStatus = () => api.get('/monitoring/status')
 export const getMonitoringEvents = (directory, limit = 100) => api.get('/monitoring/events', { params: { directory, limit } })
 
 // History APIs
-export const getHistory = (params) => api.get('/history', { params })
+export const getHistory = (params) => api.get('/history/', { params })
 export const getHistoryStats = () => api.get('/history/stats')
 export const getSessionDetail = (id) => api.get(`/history/${id}`)
 export const getSessionOperations = (id) => api.get(`/history/${id}/operations`)
 export const deleteHistoryRecord = (id) => api.delete(`/history/${id}`)
 
 // Settings APIs
-export const getSettings = () => api.get('/settings')
-export const updateSettings = (settings) => api.put('/settings', settings)
+export const getSettings = () => api.get('/settings/')
+export const updateSettings = (settings) => api.put('/settings/', settings)
 export const resetSettings = () => api.post('/settings/reset')
 
 // Health

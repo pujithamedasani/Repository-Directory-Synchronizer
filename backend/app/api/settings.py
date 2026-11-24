@@ -21,11 +21,13 @@ def _get_all_settings(db: Session) -> dict:
     return settings
 
 
+@router.get("")
 @router.get("/")
 def get_settings(db: Session = Depends(get_db)):
     return _get_all_settings(db)
 
 
+@router.put("")
 @router.put("/")
 def update_settings(body: dict, db: Session = Depends(get_db)):
     for key, value in body.items():

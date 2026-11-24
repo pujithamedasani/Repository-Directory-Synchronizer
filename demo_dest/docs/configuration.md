@@ -1,22 +1,22 @@
 # Configuration
 
-metadata file compare hash metadata
-metadata monitor filesystem metadata synchronize event
-synchronize restore checksum checksum integrity
-filesystem hash backup filesystem integrity
-metadata event thread thread compare thread compare thread restore synchronize checksum compare
-integrity directory monitor monitor process checksum async transfer backup transfer directory monitor
-async process synchronize metadata integrity transfer
-checksum synchronize file thread backup synchronize backup operation checksum directory
-backup monitor async metadata operation event monitor synchronize hash checksum
-transfer backup hash metadata checksum filesystem directory integrity
-filesystem metadata transfer restore hash monitor directory filesystem backup thread restore
-thread checksum integrity transfer directory
-restore compare file thread metadata operation async monitor operation transfer compare filesystem
-directory metadata compare transfer directory filesystem directory async directory operation
-directory transfer checksum directory synchronize metadata file
-filesystem operation process monitor filesystem thread filesystem file operation process
-event integrity integrity hash process directory thread event monitor backup
-checksum checksum synchronize monitor thread directory event file async
-thread hash backup synchronize operation filesystem filesystem operation
-hash compare checksum transfer compare monitor compare
+checksum transfer transfer restore checksum directory synchronize async directory checksum process
+file monitor thread filesystem integrity checksum synchronize compare
+restore backup compare directory integrity synchronize file compare monitor
+operation integrity directory directory backup event synchronize process operation directory filesystem event
+synchronize compare file synchronize hash hash transfer hash transfer file integrity
+restore async checksum compare file backup filesystem restore integrity hash compare
+operation checksum synchronize operation thread synchronize restore restore restore async operation
+async integrity operation compare process metadata backup directory hash directory integrity transfer
+filesystem async async integrity compare filesystem metadata synchronize compare async event
+integrity file filesystem process compare synchronize monitor
+synchronize integrity filesystem operation checksum integrity event file metadata backup
+process integrity event integrity process operation
+hash restore backup file thread async filesystem directory compare metadata monitor
+operation monitor metadata synchronize event hash process event async checksum integrity filesystem
+transfer thread process synchronize file async checksum thread synchronize monitor
+compare transfer operation process restore async event synchronize
+hash file backup directory compare filesystem transfer thread monitor
+directory restore thread hash async operation file monitor async backup async
+synchronize process directory transfer process thread hash restore
+async restore filesystem process event process checksum operation

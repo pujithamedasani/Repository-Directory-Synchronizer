@@ -19,10 +19,10 @@ function FileDistribution({ data, loading = false }) {
 
   const chartData = data
     ? [
-        { name: 'New', value: data.new_files || 0, color: COLORS.new },
-        { name: 'Modified', value: data.modified_files || 0, color: COLORS.modified },
-        { name: 'Deleted', value: data.deleted_files || 0, color: COLORS.deleted },
-        { name: 'Unchanged', value: data.unchanged_files || 0, color: COLORS.unchanged },
+        { name: 'New', value: Number(data.new ?? data.new_files ?? 0), color: COLORS.new },
+        { name: 'Modified', value: Number(data.modified ?? data.modified_files ?? 0), color: COLORS.modified },
+        { name: 'Deleted', value: Number(data.deleted ?? data.deleted_files ?? 0), color: COLORS.deleted },
+        { name: 'Unchanged', value: Number(data.unchanged ?? data.unchanged_files ?? 0), color: COLORS.unchanged },
       ].filter(d => d.value > 0)
     : []
 

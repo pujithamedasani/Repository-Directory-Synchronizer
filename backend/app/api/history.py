@@ -31,6 +31,7 @@ def _session_dict(s: SyncSession) -> dict:
     }
 
 
+@router.get("")
 @router.get("/")
 def list_history(
     page: int = Query(default=1, ge=1),

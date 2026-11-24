@@ -1,6 +1,7 @@
 """
 SyncSphere FastAPI Application Entry Point.
 """
+import asyncio
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -26,6 +27,10 @@ app_state = AppState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    try:
+        ws_manager.set_loop(asyncio.get_running_loop())
+    except Exception:
+        pass
     init_db()
     yield
     # Shutdown

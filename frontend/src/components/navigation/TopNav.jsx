@@ -1,7 +1,8 @@
 import { useLocation } from 'react-router-dom'
-import { Bell, Search } from 'lucide-react'
+import { Bell, Search, Sun, Moon } from 'lucide-react'
 import StatusDot from '../ui/StatusDot'
 import { useApp } from '../../context/AppContext'
+import { useTheme } from '../../context/ThemeContext'
 
 const pageNames = {
   '/overview': 'Overview',
@@ -16,6 +17,7 @@ const pageNames = {
 function TopNav() {
   const { pathname } = useLocation()
   const { backendConnected } = useApp()
+  const { theme, toggleTheme } = useTheme()
 
   return (
     <header className="h-14 flex items-center gap-4 px-6 border-b border-[#2a2a3a] bg-[#0f0f17] shrink-0">
@@ -34,6 +36,19 @@ function TopNav() {
           className="w-48 bg-[#1e1e2a] border border-[#2a2a3a] text-slate-300 placeholder-slate-600 text-sm rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent transition-colors"
         />
       </div>
+
+      {/* Theme toggle */}
+      <button
+        onClick={toggleTheme}
+        className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#1e1e2a] transition-colors flex items-center gap-1.5"
+        title={`Toggle to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+      >
+        {theme === 'dark' ? (
+          <Sun className="h-4 w-4 text-amber-400" />
+        ) : (
+          <Moon className="h-4 w-4 text-indigo-500" />
+        )}
+      </button>
 
       {/* Notification bell */}
       <button className="p-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-[#1e1e2a] transition-colors relative">

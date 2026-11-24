@@ -9,13 +9,13 @@ hierarchical namespace creation.
 import os
 import shutil
 import threading
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
 from app.services.comparison_engine import compare_directories, ComparisonResult
+from app.services.conflict_manager import detect_conflicts, get_conflicts
 from app.database.database import SessionLocal
 from app.database import models
 
@@ -45,6 +45,8 @@ def _update_session(session_id: int, **kwargs):
             for k, v in kwargs.items():
                 setattr(sess, k, v)
             db.commit()
+    except Exception:
+        pass
     finally:
         db.close()
 
@@ -63,6 +65,8 @@ def _log_operation(session_id: int, file_path: str, op_type: str,
         )
         db.add(op)
         db.commit()
+    except Exception:
+        pass
     finally:
         db.close()
 
@@ -72,8 +76,8 @@ def _log_operation(session_id: int, file_path: str, op_type: str,
 def sync_one_way(source: str, dest: str, options: SyncOptions,
                  session_id: int, ws_manager=None):
     """
-    Synchronise *source* → *dest*.
-    Runs in a background thread.  Progress is broadcast via *ws_manager*.
+    Synchronise source -> dest (Mirror).
+    Runs in a background thread. Progress is broadcast via ws_manager.
     """
     global _cancel_requested, _active_sync
 
@@ -93,12 +97,7 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
 
     def _broadcast(msg: dict):
         if ws_manager:
-            try:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(ws_manager.broadcast_sync_progress(msg))
-                loop.close()
-            except Exception:
-                pass
+            ws_manager.broadcast_sync_progress_threadsafe(msg)
 
     _update_session(session_id, status="running")
 
@@ -113,7 +112,7 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
             try:
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(src_path), str(dst_path))
-                size = fc.source_size or 0
+                size = fc.source_size or (src_path.stat().st_size if src_path.exists() else 0)
                 bytes_xfer += size
                 if fc.status == "new":
                     copied += 1
@@ -145,9 +144,10 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
             "total_files": total,
             "current_file": fc.relative_path,
             "percent": int(done / max(total, 1) * 100),
+            "bytes_done": bytes_xfer,
         })
 
-    # Delete extra dest files
+    # Delete extra dest files if requested
     if options.delete_extra and not _cancel_requested:
         for fc in comparison.deleted_files:
             if _cancel_requested:
@@ -157,7 +157,7 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
                 try:
                     if dst_path.is_dir():
                         shutil.rmtree(str(dst_path))
-                    else:
+                    elif dst_path.exists():
                         os.remove(str(dst_path))
                     deleted += 1
                     _log_operation(session_id, fc.relative_path, "delete")
@@ -173,6 +173,7 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
                 "total_files": total,
                 "current_file": fc.relative_path,
                 "percent": int(done / max(total, 1) * 100),
+                "bytes_done": bytes_xfer,
             })
 
     final_status = "cancelled" if _cancel_requested else "completed"
@@ -186,7 +187,183 @@ def sync_one_way(source: str, dest: str, options: SyncOptions,
         files_skipped=skipped,
         bytes_transferred=bytes_xfer,
     )
-    _broadcast({"session_id": session_id, "status": final_status, "percent": 100})
+    _broadcast({"session_id": session_id, "status": final_status, "percent": 100, "type": "completed"})
+
+    with _sync_lock:
+        _active_sync = None
+
+
+def sync_two_way(source: str, dest: str, options: SyncOptions,
+                 session_id: int, ws_manager=None):
+    """
+    Synchronise source <-> dest (Bidirectional).
+    - New files in source are copied to dest.
+    - Files present only in dest are copied to source.
+    - Modified files are resolved via conflict manager resolution or latest mtime.
+    """
+    global _cancel_requested, _active_sync
+
+    cmp_opts = {
+        "use_checksum": True,
+        "include_hidden": options.include_hidden,
+    }
+    comparison: ComparisonResult = compare_directories(source, dest, cmp_opts)
+    detect_conflicts(comparison)
+    conflict_map = {c.relative_path: c.resolution for c in get_conflicts()}
+
+    # Items to process
+    src_to_dest = comparison.new_files
+    dest_to_source = comparison.deleted_files  # In two-way sync, "deleted" in source means present in dest only!
+    modified = comparison.modified_files
+
+    if options.selective_files:
+        src_to_dest = [f for f in src_to_dest if f.relative_path in options.selective_files]
+        dest_to_source = [f for f in dest_to_source if f.relative_path in options.selective_files]
+        modified = [f for f in modified if f.relative_path in options.selective_files]
+
+    total = len(src_to_dest) + len(dest_to_source) + len(modified)
+    done = 0
+    copied = updated = deleted = skipped = bytes_xfer = 0
+
+    def _broadcast(msg: dict):
+        if ws_manager:
+            ws_manager.broadcast_sync_progress_threadsafe(msg)
+
+    _update_session(session_id, status="running")
+
+    # 1. Copy new source files -> destination
+    for fc in src_to_dest:
+        if _cancel_requested:
+            break
+        src_path = Path(source) / fc.relative_path
+        dst_path = Path(dest) / fc.relative_path
+
+        if not options.dry_run:
+            try:
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src_path), str(dst_path))
+                size = fc.source_size or (src_path.stat().st_size if src_path.exists() else 0)
+                bytes_xfer += size
+                copied += 1
+                _log_operation(session_id, fc.relative_path, "copy (source->dest)", size)
+            except Exception as exc:
+                skipped += 1
+                _log_operation(session_id, fc.relative_path, "skip", 0, "error", str(exc))
+        else:
+            copied += 1
+
+        done += 1
+        _broadcast({
+            "session_id": session_id,
+            "files_done": done,
+            "total_files": total,
+            "current_file": f"{fc.relative_path} (-> dest)",
+            "percent": int(done / max(total, 1) * 100),
+            "bytes_done": bytes_xfer,
+        })
+
+    # 2. Copy dest-only files -> source (Bidirectional propagation)
+    for fc in dest_to_source:
+        if _cancel_requested:
+            break
+        dst_path = Path(dest) / fc.relative_path
+        src_path = Path(source) / fc.relative_path
+
+        if not options.dry_run:
+            try:
+                src_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(dst_path), str(src_path))
+                size = fc.dest_size or (dst_path.stat().st_size if dst_path.exists() else 0)
+                bytes_xfer += size
+                copied += 1
+                _log_operation(session_id, fc.relative_path, "copy (dest->source)", size)
+            except Exception as exc:
+                skipped += 1
+                _log_operation(session_id, fc.relative_path, "skip", 0, "error", str(exc))
+        else:
+            copied += 1
+
+        done += 1
+        _broadcast({
+            "session_id": session_id,
+            "files_done": done,
+            "total_files": total,
+            "current_file": f"{fc.relative_path} (-> source)",
+            "percent": int(done / max(total, 1) * 100),
+            "bytes_done": bytes_xfer,
+        })
+
+    # 3. Handle modified files with conflict resolution / timestamp comparison
+    for fc in modified:
+        if _cancel_requested:
+            break
+        src_path = Path(source) / fc.relative_path
+        dst_path = Path(dest) / fc.relative_path
+
+        resolution = conflict_map.get(fc.relative_path)
+
+        if not options.dry_run:
+            try:
+                # Check user explicit choice or fall back to newer timestamp
+                copy_direction = None
+                if resolution in ("source", "keep_source"):
+                    copy_direction = "src_to_dst"
+                elif resolution in ("dest", "keep_dest"):
+                    copy_direction = "dst_to_src"
+                elif resolution == "skip":
+                    copy_direction = None
+                else:
+                    # Automatic timestamp resolution: newer file wins
+                    src_m = src_path.stat().st_mtime if src_path.exists() else 0
+                    dst_m = dst_path.stat().st_mtime if dst_path.exists() else 0
+                    if src_m >= dst_m:
+                        copy_direction = "src_to_dst"
+                    else:
+                        copy_direction = "dst_to_src"
+
+                if copy_direction == "src_to_dst":
+                    shutil.copy2(str(src_path), str(dst_path))
+                    size = src_path.stat().st_size
+                    bytes_xfer += size
+                    updated += 1
+                    _log_operation(session_id, fc.relative_path, "update (source->dest)", size)
+                elif copy_direction == "dst_to_src":
+                    shutil.copy2(str(dst_path), str(src_path))
+                    size = dst_path.stat().st_size
+                    bytes_xfer += size
+                    updated += 1
+                    _log_operation(session_id, fc.relative_path, "update (dest->source)", size)
+                else:
+                    skipped += 1
+                    _log_operation(session_id, fc.relative_path, "skip", 0)
+            except Exception as exc:
+                skipped += 1
+                _log_operation(session_id, fc.relative_path, "skip", 0, "error", str(exc))
+        else:
+            updated += 1
+
+        done += 1
+        _broadcast({
+            "session_id": session_id,
+            "files_done": done,
+            "total_files": total,
+            "current_file": f"{fc.relative_path} (conflict resolved)",
+            "percent": int(done / max(total, 1) * 100),
+            "bytes_done": bytes_xfer,
+        })
+
+    final_status = "cancelled" if _cancel_requested else "completed"
+    _update_session(
+        session_id,
+        status=final_status,
+        end_time=datetime.utcnow(),
+        files_copied=copied,
+        files_updated=updated,
+        files_deleted=deleted,
+        files_skipped=skipped,
+        bytes_transferred=bytes_xfer,
+    )
+    _broadcast({"session_id": session_id, "status": final_status, "percent": 100, "type": "completed"})
 
     with _sync_lock:
         _active_sync = None
@@ -224,8 +401,10 @@ def start_sync(source: str, dest: str, options: SyncOptions, db) -> int:
 
     from app.websocket.progress_manager import ws_manager
 
+    target_func = sync_two_way if options.mode == "two_way" else sync_one_way
+
     thread = threading.Thread(
-        target=sync_one_way,
+        target=target_func,
         args=(source, dest, options, session_id, ws_manager),
         daemon=True,
     )

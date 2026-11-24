@@ -4,15 +4,17 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
   const [status, setStatus] = useState('disconnected') // connected | disconnected | reconnecting | error
   const wsRef = useRef(null)
   const reconnectRef = useRef(0)
-  const maxReconnects = 3
+  const maxReconnects = 5
   const shouldConnectRef = useRef(enabled)
+  const onMessageRef = useRef(onMessage)
+  onMessageRef.current = onMessage
 
   const connect = useCallback(() => {
     if (!url || !shouldConnectRef.current) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}${url}`
-    
+
     try {
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
@@ -25,9 +27,9 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          onMessage?.(data)
+          onMessageRef.current?.(data)
         } catch {
-          onMessage?.({ type: 'raw', data: event.data })
+          onMessageRef.current?.({ type: 'raw', data: event.data })
         }
       }
 
@@ -40,14 +42,14 @@ export function useWebSocket(url, { enabled = true, onMessage } = {}) {
         if (shouldConnectRef.current && reconnectRef.current < maxReconnects) {
           setStatus('reconnecting')
           reconnectRef.current++
-          const delay = 1000 * Math.pow(2, reconnectRef.current - 1)
+          const delay = Math.min(1000 * Math.pow(2, reconnectRef.current - 1), 10000)
           setTimeout(connect, delay)
         }
       }
     } catch {
       setStatus('error')
     }
-  }, [url, onMessage])
+  }, [url])
 
   useEffect(() => {
     shouldConnectRef.current = enabled

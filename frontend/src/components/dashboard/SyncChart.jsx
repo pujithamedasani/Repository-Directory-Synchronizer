@@ -46,7 +46,7 @@ function SyncChart({ data = [], loading = false }) {
               tickLine={false}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Line type="monotone" dataKey="files_synced" name="Files" stroke="#6366f1" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="files_synced" name="Files" stroke="#6366f1" strokeWidth={2} dot={{ r: 4, fill: '#6366f1' }} activeDot={{ r: 6 }} />
           </LineChart>
         </ResponsiveContainer>
       )}
